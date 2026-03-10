@@ -127,7 +127,8 @@
 
 Обязательно, в образе logstash существует ILM, в дальнейшем вы сможете удалить или изменить, поэтому нужно после перезапуска (через минуты 3) ввести данные строки:
 
-``` curl -k -X PUT "https://IP:9200/_ilm/policy/filebeat-retention-policy" \
+```
+curl -k -X PUT "https://IP:9200/_ilm/policy/filebeat-retention-policy" \
 -H 'Content-Type: application/json' \
 -u "elastic:ТВОЙ_ПАРОЛЬ" \
 -d'
@@ -150,7 +151,8 @@
 
 И вот это:
 
-``` curl -k -X PUT "https://IP:9200/_index_template/filebeat-custom-ilm" \
+```
+curl -k -X PUT "https://IP:9200/_index_template/filebeat-custom-ilm" \
 -H 'Content-Type: application/json' \
 -u "elastic:ТВОЙ_ПАРОЛЬ" \
 -d'
