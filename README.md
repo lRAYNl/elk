@@ -204,7 +204,8 @@ curl -k -X PUT "https://IP:9200/_index_template/filebeat-custom-ilm" \
 
 Подключаем s3 хранилище
 
-``` curl -k -X PUT "https://IP:9200/_snapshot/s3-archive" \
+```
+curl -k -X PUT "https://IP:9200/_snapshot/s3-archive" \
 -H 'Content-Type: application/json' \
 -u "elastic:ТВОЙ_ПАРОЛЬ" \
 -d'
