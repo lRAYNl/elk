@@ -1,0 +1,81 @@
+version: '3.8'
+
+networks:
+  elk_network:
+    driver: bridge
+
+services:
+  elasticsearch:
+    image: raul5589/elasticsearch-custom:9.2.2
+    container_name: ${NODE_NAME}
+    environment:
+      - node.name=${NODE_NAME}
+      - node.roles=master,data
+      - cluster.name=${CLUSTER_NAME}
+      - discovery.seed_hosts=${SEED_HOSTS}
+      - cluster.initial_master_nodes=${INITIAL_MASTER_NODES}
+      - network.publish_host=${PUBLISH_HOST}
+      - bootstrap.memory_lock=true
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+      - xpack.security.enabled=true
+      - xpack.security.transport.ssl.enabled=true
+      - xpack.security.transport.ssl.verification_mode=certificate
+      - xpack.security.transport.ssl.keystore.path=certs/elastic-certificates.p12
+      - xpack.security.transport.ssl.truststore.path=certs/elastic-certificates.p12
+      - xpack.security.http.ssl.enabled=true
+      - xpack.security.http.ssl.keystore.path=certs/elastic-certificates.p12
+      - xpack.security.http.ssl.truststore.path=certs/elastic-certificates.p12
+      #- s3.client.default.endpoint=${S3_HOST}
+      #- s3.client.default.protocol=https
+      #- s3.client.default.path_style_access=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+      - ./certs:/usr/share/elasticsearch/config/certs:ro
+    networks:
+      - elk_network
+    restart: unless-stopped
+
+  logstash:
+    image: raul5589/logstash-custom:1.0
+    container_name: logstash-${NODE_NAME}
+    environment:
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+    ports:
+      - "5044:5044"
+    volumes:
+      - ./certs:/usr/share/logstash/config/certs:ro
+    networks:
+      - elk_network
+    depends_on:
+      - elasticsearch
+    restart: unless-stopped
+
+  kibana:
+    image: raul5589/kibana-custom:9.2.2
+    container_name: kibana-${NODE_NAME}
+    environment:
+      - SERVER_NAME=kibana-${NODE_NAME}
+      - ELASTICSEARCH_HOSTS=https://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${KIBANA_PASSWORD}
+      - ELASTICSEARCH_SSL_VERIFICATIONMODE=none
+      - XPACK_SECURITY_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY}
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY}
+      - XPACK_REPORTING_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY}
+    ports:
+      - "5601:5601"
+    networks:
+      - elk_network
+    depends_on:
+      - elasticsearch
+    restart: unless-stopped
+
+volumes:
+  es_data:
