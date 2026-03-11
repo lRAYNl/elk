@@ -43,12 +43,11 @@ services:
     restart: unless-stopped
 
   logstash:
-    image: raul5589/logstash-custom:1.0
+    image: raul5589/logstash-custom:1.2-kafka
     container_name: logstash-${NODE_NAME}
     environment:
       - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
-    ports:
-      - "5044:5044"
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
     volumes:
       - ./certs:/usr/share/logstash/config/certs:ro
     networks:
