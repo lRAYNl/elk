@@ -25,9 +25,9 @@ services:
       - xpack.security.http.ssl.enabled=true
       - xpack.security.http.ssl.keystore.path=certs/elastic-certificates.p12
       - xpack.security.http.ssl.truststore.path=certs/elastic-certificates.p12
-      #- s3.client.default.endpoint=${S3_HOST}
-      #- s3.client.default.protocol=https
-      #- s3.client.default.path_style_access=true
+      - s3.client.default.endpoint=${S3_HOST}
+      - s3.client.default.protocol=https
+      - s3.client.default.path_style_access=true
     ulimits:
       memlock:
         soft: -1
