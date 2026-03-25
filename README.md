@@ -195,12 +195,24 @@ openssl x509 -req -days 3650 \
 ### 1.6 Распределить сертификаты
 
 ```bash
-# На elk-node-02 и elk-node-03 (ca.key и elastic-stack-ca.p12 НЕ копировать)
-for NODE in elk-node-02 elk-node-03; do
-  ssh user@$NODE "mkdir -p ~/elk/certs"
-  scp ~/elk/certs/{ca.crt,elastic-certificates.p12,kibana.crt,kibana.key,logstash.crt,logstash.key,logstash-truststore.p12,kafka.crt,kafka.key} \
-    user@$NODE:~/elk/certs/
-done
+# Для начала выделяем права на папку (на всех узлах)
+
+sudo chmod -R 644 certs/
+
+sudo chmod 755 certs/
+
+# На все остальные (ca.key и elastic-stack-ca.p12 НЕ копировать) перенести сертификаты удобным способом
+
+cd certs/
+
+sudo python3 -m http.server PORT #в port пишем свой порт
+
+# На остальных нодах пишем
+
+cd certs/
+
+sudo wget http://IP:PORT/требуемый_файл
+
 ```
 
 > **`ca.key` и `elastic-stack-ca.p12` хранить только на elk-node-01 в безопасном месте.**
