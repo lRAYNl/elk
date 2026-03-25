@@ -126,22 +126,10 @@ Elasticsearch использует `.p12` для транспортного и H
 
 ```bash
 # Создать CA в формате p12 через elasticsearch-certutil
-docker run --rm \
-  -v "$(pwd):/certs" \
-  docker.elastic.co/elasticsearch/elasticsearch:9.2.2 \
-  bin/elasticsearch-certutil ca \
-    --out /certs/elastic-stack-ca.p12 \
-    --pass ""
+sudo docker run -u root --rm -v $(pwd)/certs:/certs docker.elastic.co/elasticsearch/elasticsearch:9.2.2 bin/elasticsearch-certutil ca --out /certs/elastic-stack-ca.p12 --pass
 
 # Создать сертификат узлов ES
-docker run --rm \
-  -v "$(pwd):/certs" \
-  docker.elastic.co/elasticsearch/elasticsearch:9.2.2 \
-  bin/elasticsearch-certutil cert \
-    --ca /certs/elastic-stack-ca.p12 \
-    --ca-pass "" \
-    --out /certs/elastic-certificates.p12 \
-    --pass ""
+sudo docker run -u root --rm -v $(pwd)/certs:/certs docker.elastic.co/elasticsearch/elasticsearch:9.2.2 bin/elasticsearch-certutil cert --ca /certs/elastic-stack-ca.p12 --out /certs/elastic-certificates.p12 --ca-pass "" --pass "" --dns localhost,ИМЕНА_НОДОВ,elasticsearch --ip 127.0.0.1,ВСЕ_IP_НА_КОТОРЫХ_БУДЕТ_ELK
 ```
 
 ### 1.3 Сертификат Kibana
@@ -270,9 +258,17 @@ docker logs ${NODE_NAME} --tail 80
 
 ---
 
-## Шаг 4 — Установка пароля kibana\_system
+## Шаг 4 — Установка паролей
 
 Выполнить **один раз** с любого ELK-узла после старта Elasticsearch:
+
+```bash
+curl -k \
+  -u elastic:${ELASTIC_PASSWORD} \
+  -X POST "https://localhost:9200/_security/user/elastic/_password" \
+  -H "Content-Type: application/json" \
+  -d '{"password": "${ELASTIC_PASSWORD}"}'
+```
 
 ```bash
 curl -k \
