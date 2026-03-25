@@ -51,6 +51,21 @@
 ### Обязательная системная настройка (на каждом ELK-узле)
 
 ```bash
+# На каждом ELK-узле
+git clone https://github.com/lRAYNl/elk.git ~/elk
+
+# На каждом Kafka-узле
+git clone https://github.com/lRAYNl/kafka.git ~/kafka
+
+# На каждом хосте, где собираются логи
+git clone https://github.com/lRAYNl/filebeat.git ~/filebeat
+
+# Обновить пакеты
+sudo apt-get update && sudo apt-get upgrade -y
+
+# Установить Docker
+sudo apt install docker-compose-v2
+
 # Применить немедленно
 sudo sysctl -w vm.max_map_count=262144
 
