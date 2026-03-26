@@ -279,14 +279,6 @@ docker logs ${NODE_NAME} --tail 80
 ```bash
 curl -k \
   -u elastic:${ELASTIC_PASSWORD} \
-  -X POST "https://localhost:9200/_security/user/elastic/_password" \
-  -H "Content-Type: application/json" \
-  -d '{"password": "${ELASTIC_PASSWORD}"}'
-```
-
-```bash
-curl -k \
-  -u elastic:${ELASTIC_PASSWORD} \
   -X POST "https://localhost:9200/_security/user/kibana_system/_password" \
   -H "Content-Type: application/json" \
   -d '{"password": "${KIBANA_PASSWORD}"}'
