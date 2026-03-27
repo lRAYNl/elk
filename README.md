@@ -371,14 +371,14 @@ docker logs es-node-01 --tail 80
 ## Шаг 6 — Установка пароля kibana\_system
 
 Выполнить **один раз** с любого ELK-узла после старта Elasticsearch.  
-Подставить реальные значения паролей из `.env`:
+Подставить реальные значения паролей из `.env`. Можно воспользоваться командой source .env, чтобы пароли автоматически подтягивались:
 
 ```bash
 curl -k \
-  -u elastic:ELASTIC_PASSWORD \
+  -u elastic:${ELASTIC_PASSWORD} \
   -X POST "https://localhost:9200/_security/user/kibana_system/_password" \
   -H "Content-Type: application/json" \
-  -d '{"password": "KIBANA_PASSWORD"}'
+  -d '{"password": "${KIBANA_PASSWORD}"}'
 ```
 
 Успешный ответ: `{}`
@@ -399,7 +399,7 @@ curl -k \
 
 ```bash
 curl -k \
-  -u elastic:ELASTIC_PASSWORD \
+  -u elastic:${ELASTIC_PASSWORD} \
   -X PUT "https://localhost:9200/_ilm/policy/filebeat-policy" \
   -H "Content-Type: application/json" \
   -d '{
@@ -440,7 +440,7 @@ curl -k \
 
 ```bash
 curl -k \
-  -u elastic:ELASTIC_PASSWORD \
+  -u elastic:${ELASTIC_PASSWORD} \
   -X PUT "https://localhost:9200/_index_template/filebeat-template" \
   -H "Content-Type: application/json" \
   -d '{
@@ -470,11 +470,11 @@ curl -k \
 
 ```bash
 # Список политик
-curl -k -u elastic:ELASTIC_PASSWORD \
+curl -k -u elastic:${ELASTIC_PASSWORD} \
   "https://localhost:9200/_ilm/policy?pretty"
 
 # Статус ILM по индексам filebeat-*
-curl -k -u elastic:ELASTIC_PASSWORD \
+curl -k -u elastic:${ELASTIC_PASSWORD} \
   "https://localhost:9200/filebeat-*/_ilm/explain?pretty"
 ```
 
@@ -505,7 +505,7 @@ exit
 
 ```bash
 curl -k \
-  -u elastic:ELASTIC_PASSWORD \
+  -u elastic:${ELASTIC_PASSWORD} \
   -X POST "https://localhost:9200/_nodes/reload_secure_settings" \
   -H "Content-Type: application/json" \
   -d '{}'
@@ -515,7 +515,7 @@ curl -k \
 
 ```bash
 curl -k \
-  -u elastic:ELASTIC_PASSWORD \
+  -u elastic:${ELASTIC_PASSWORD} \
   -X PUT "https://localhost:9200/_snapshot/s3_backup" \
   -H "Content-Type: application/json" \
   -d '{
@@ -531,7 +531,7 @@ curl -k \
 ### 8.3 Проверить репозиторий
 
 ```bash
-curl -k -u elastic:ELASTIC_PASSWORD \
+curl -k -u elastic:${ELASTIC_PASSWORD} \
   "https://localhost:9200/_snapshot/s3_backup?pretty"
 ```
 
@@ -539,7 +539,7 @@ curl -k -u elastic:ELASTIC_PASSWORD \
 
 ```bash
 curl -k \
-  -u elastic:ELASTIC_PASSWORD \
+  -u elastic:${ELASTIC_PASSWORD} \
   -X PUT "https://localhost:9200/_snapshot/s3_backup/snapshot_test?wait_for_completion=true" \
   -H "Content-Type: application/json" \
   -d '{
@@ -553,7 +553,7 @@ curl -k \
 
 ```bash
 curl -k \
-  -u elastic:ELASTIC_PASSWORD \
+  -u elastic:${ELASTIC_PASSWORD} \
   -X PUT "https://localhost:9200/_slm/policy/daily-snapshots" \
   -H "Content-Type: application/json" \
   -d '{
@@ -580,7 +580,7 @@ curl -k \
 ### Health кластера
 
 ```bash
-curl -k -u elastic:ELASTIC_PASSWORD \
+curl -k -u elastic:${ELASTIC_PASSWORD} \
   "https://localhost:9200/_cluster/health?pretty"
 ```
 
@@ -589,7 +589,7 @@ curl -k -u elastic:ELASTIC_PASSWORD \
 ### Узлы кластера
 
 ```bash
-curl -k -u elastic:ELASTIC_PASSWORD \
+curl -k -u elastic:${ELASTIC_PASSWORD} \
   "https://localhost:9200/_cat/nodes?v"
 ```
 
@@ -605,7 +605,7 @@ curl -k -u elastic:ELASTIC_PASSWORD \
 ### Проверить поступление данных из Kafka
 
 ```bash
-curl -k -u elastic:ELASTIC_PASSWORD \
+curl -k -u elastic:${ELASTIC_PASSWORD} \
   "https://localhost:9200/_cat/indices?v&index=filebeat-*"
 ```
 
@@ -626,6 +626,12 @@ input {
     group_id => "logstash-diploma-v2"
     auto_offset_reset => "earliest"
     codec => "json"
+    
+    security_protocol => "SSL"
+    ssl_truststore_type => "pkcs12"
+    ssl_truststore_location => "/usr/share/logstash/config/certs/logstash-truststore.p12"
+    ssl_truststore_password => "changeit"
+    ssl_endpoint_identification_algorithm => ""
   }
 }
 
