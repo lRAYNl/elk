@@ -371,7 +371,7 @@ docker logs es-node-01 --tail 80
 ## Шаг 6 — Установка пароля kibana\_system
 
 Выполнить **один раз** с любого ELK-узла после старта Elasticsearch.  
-Подставить реальные значения паролей из `.env`. Можно воспользоваться командой source .env, чтобы пароли автоматически подтягивались:
+Подставить реальные значения паролей из `.env`. Можно воспользоваться командой `source .env`, чтобы пароли автоматически подтягивались:
 
 ```bash
 curl -k -X POST "https://127.0.0.1:9200/_security/user/kibana_system/_password" \
@@ -601,21 +601,11 @@ curl -k -u elastic:${ELASTIC_PASSWORD} \
 > В **Firefox**: нажать "Дополнительно" → "Принять риск и продолжить".  
 > В **Chrome/Edge**: напечатать на странице с ошибкой слово `thisisunsafe` (без поля ввода).
 
-### Проверить поступление данных из Kafka
-
-```bash
-curl -k -u elastic:${ELASTIC_PASSWORD} \
-  "https://localhost:9200/_cat/indices?v&index=filebeat-*"
-```
-
-В Kibana: **Stack Management → Index Management** → убедиться что индексы `filebeat-*` существуют.  
-Затем: **Discover → Create data view → Pattern: `filebeat-*`**.
-
 ---
 
-## Изменение конфигурации Logstash pipeline
+## ОБЯЗАТЕЛЬНОЕ Изменение конфигурации Logstash pipeline
 
-Встроенный в образ конфиг `/usr/share/logstash/pipeline/logstash.conf`:
+Встроенный в образ конфиг `/usr/share/logstash/pipeline/logstash.conf` изменить, на приведенный ниже, поскольку конфиг в образе не использует SSL:
 
 ```ruby
 input {
@@ -662,6 +652,16 @@ volumes:
 ```bash
 docker compose up -d --force-recreate logstash
 ```
+
+### Проверить поступление данных из Kafka
+
+```bash
+curl -k -u elastic:${ELASTIC_PASSWORD} \
+  "https://localhost:9200/_cat/indices?v&index=filebeat-*"
+```
+
+В Kibana: **Stack Management → Index Management** → убедиться что индексы `filebeat-*` существуют.  
+Затем: **Discover → Create data view → Pattern: `filebeat-*`**.
 
 ### Временное обновление без пересоздания контейнера
 
