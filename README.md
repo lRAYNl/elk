@@ -374,11 +374,10 @@ docker logs es-node-01 --tail 80
 Подставить реальные значения паролей из `.env`. Можно воспользоваться командой source .env, чтобы пароли автоматически подтягивались:
 
 ```bash
-curl -k \
-  -u elastic:${ELASTIC_PASSWORD} \
-  -X POST "https://localhost:9200/_security/user/kibana_system/_password" \
-  -H "Content-Type: application/json" \
-  -d '{"password": "${KIBANA_PASSWORD}"}'
+curl -k -X POST "https://127.0.0.1:9200/_security/user/kibana_system/_password" \
+-u "elastic:${ELASTIC_PASSWORD}" \
+-H "Content-Type: application/json" \
+-d "{ \"password\": \"${KIBANA_PASSWORD}\" }"
 ```
 
 Успешный ответ: `{}`
