@@ -2,7 +2,11 @@
 
 Развёртывание трёхузлового кластера **Elasticsearch 9.2.2** с Logstash и Kibana.  
 Транспорт и HTTP защищены TLS. Логи поступают из Kafka через Logstash.
-Для установки git clone https://github.com/lRAYNl/elk.git
+
+```
+git clone https://github.com/lRAYNl/elk.git ~/elk
+```
+
 ---
 
 ## Содержание
@@ -10,13 +14,15 @@
 - [Архитектура](#архитектура)
 - [Требования](#требования)
 - [Структура репозитория](#структура-репозитория)
-- [Шаг 1 — Генерация SSL-сертификатов](#шаг-1--генерация-ssl-сертификатов)
-- [Шаг 2 — Настройка .env](#шаг-2--настройка-env)
-- [Шаг 3 — Запуск кластера](#шаг-3--запуск-кластера)
-- [Шаг 4 — Установка пароля kibana\_system](#шаг-4--установка-пароля-kibana_system)
-- [Шаг 5 — Настройка ILM (Index Lifecycle Management)](#шаг-5--настройка-ilm-index-lifecycle-management)
-- [Шаг 6 — Настройка S3 snapshot-репозитория](#шаг-6--настройка-s3-snapshot-репозитория)
-- [Шаг 7 — Проверка системы](#шаг-7--проверка-системы)
+- [Шаг 1 — Генерация SSL-сертификатов ELK](#шаг-1--генерация-ssl-сертификатов-elk)
+- [Шаг 2 — Добавление Kafka CA в Logstash truststore](#шаг-2--добавление-kafka-ca-в-logstash-truststore)
+- [Шаг 3 — Распределение сертификатов](#шаг-3--распределение-сертификатов)
+- [Шаг 4 — Настройка .env](#шаг-4--настройка-env)
+- [Шаг 5 — Запуск кластера](#шаг-5--запуск-кластера)
+- [Шаг 6 — Установка пароля kibana\_system](#шаг-6--установка-пароля-kibana_system)
+- [Шаг 7 — Настройка ILM](#шаг-7--настройка-ilm-index-lifecycle-management)
+- [Шаг 8 — Настройка S3 snapshot-репозитория](#шаг-8--настройка-s3-snapshot-репозитория)
+- [Шаг 9 — Проверка системы](#шаг-9--проверка-системы)
 - [Изменение конфигурации Logstash pipeline](#изменение-конфигурации-logstash-pipeline)
 - [Полезные команды](#полезные-команды)
 - [Устранение неполадок](#устранение-неполадок)
@@ -48,32 +54,18 @@
 - OpenSSL 3.0+
 - ОЗУ: минимум 4 ГБ на узел (Elasticsearch занимает 2 ГБ heap)
 
-### Обязательная системная настройка (на каждом ELK-узле)
+### Установка Docker и обязательная системная настройка
+
+Выполнить на **каждом** ELK-узле:
 
 ```bash
-# На каждом ELK-узле
-git clone https://github.com/lRAYNl/elk.git ~/elk
-
-# На каждом Kafka-узле
-git clone https://github.com/lRAYNl/kafka.git ~/kafka
-
-# На каждом хосте, где собираются логи
-git clone https://github.com/lRAYNl/filebeat.git ~/filebeat
-
-# Обновить пакеты
 sudo apt-get update && sudo apt-get upgrade -y
+sudo apt install docker-compose-v2 -y
 
-# Установить Docker
-sudo apt install docker-compose-v2
-
-# Применить немедленно
+# Обязательно — без этого Elasticsearch не запустится
 sudo sysctl -w vm.max_map_count=262144
-
-# Сделать постоянным после перезагрузки
 echo 'vm.max_map_count=262144' | sudo tee -a /etc/sysctl.conf
 ```
-
-> Без этой настройки Elasticsearch не запустится.
 
 ---
 
@@ -83,33 +75,34 @@ echo 'vm.max_map_count=262144' | sudo tee -a /etc/sysctl.conf
 elk/
 ├── docker-compose.yml
 ├── .env.template
-├── logstash.conf          # переопределение pipeline (см. раздел Logstash)
+├── logstash.conf          # переопределение pipeline (опционально)
 └── certs/                 # создаётся вручную (см. Шаг 1)
     ├── ca.crt
     ├── ca.key             # только на elk-node-01!
+    ├── ca.srl
     ├── elastic-certificates.p12
-    ├── elastic-stack-ca.p12
+    ├── elastic-stack-ca.p12   # только на elk-node-01!
     ├── kibana.crt
     ├── kibana.key
     ├── logstash.crt
     ├── logstash.key
-    ├── logstash-truststore.p12
-    ├── kafka.crt          # нужен Logstash для SSL с Kafka
+    ├── logstash-truststore.p12  # содержит оба CA: ELK-CA + Kafka-CA
+    ├── kafka-ca.crt         # CA от Kafka-кластера
+    ├── kafka.crt
     └── kafka.key
 ```
 
 ---
 
-## Шаг 1 — Генерация SSL-сертификатов
+## Шаг 1 — Генерация SSL-сертификатов ELK
 
 > Все команды выполняются на **elk-node-01** в директории `~/elk/certs/`.
-> Затем файлы распределяются по остальным узлам.
 
 ```bash
 mkdir -p ~/elk/certs && cd ~/elk/certs
 ```
 
-### 1.1 Корневой CA
+### 1.1 Корневой CA для ELK
 
 ```bash
 openssl genrsa -out ca.key 4096
@@ -122,13 +115,14 @@ openssl req -new -x509 -days 3650 \
 
 ### 1.2 Сертификаты Elasticsearch (формат PKCS12)
 
-Elasticsearch использует `.p12` для транспортного и HTTP TLS:
-
 ```bash
-# Создать CA в формате p12 через elasticsearch-certutil
+# Вернуться в директорию elk (важно для --user флага)
+cd ~/elk
+
+# Создать CA в формате p12
 docker run --rm \
   --user "$(id -u):$(id -g)" \
-  -v "$(pwd):/certs" \
+  -v "$(pwd)/certs:/certs" \
   docker.elastic.co/elasticsearch/elasticsearch:9.2.2 \
   bin/elasticsearch-certutil ca \
     --out /certs/elastic-stack-ca.p12 \
@@ -137,13 +131,15 @@ docker run --rm \
 # Создать сертификат узлов ES
 docker run --rm \
   --user "$(id -u):$(id -g)" \
-  -v "$(pwd):/certs" \
+  -v "$(pwd)/certs:/certs" \
   docker.elastic.co/elasticsearch/elasticsearch:9.2.2 \
   bin/elasticsearch-certutil cert \
     --ca /certs/elastic-stack-ca.p12 \
     --ca-pass "" \
     --out /certs/elastic-certificates.p12 \
     --pass ""
+
+cd certs/
 ```
 
 ### 1.3 Сертификат Kibana
@@ -172,15 +168,19 @@ openssl x509 -req -days 3650 \
   -in logstash.csr \
   -CA ca.crt -CAkey ca.key -CAcreateserial \
   -out logstash.crt
-
-# Truststore для Logstash → Elasticsearch
-openssl pkcs12 -export -nokeys \
-  -in ca.crt \
-  -out logstash-truststore.p12 \
-  -passout pass:
 ```
 
-### 1.5 Сертификат Kafka (для Logstash-клиента)
+### 1.5 Создать начальный Logstash truststore (из ELK CA)
+
+```bash
+openssl pkcs12 -export \
+  -nokeys \
+  -in ca.crt \
+  -out logstash-truststore.p12 \
+  -passout pass:changeit
+```
+
+### 1.6 Сертификат Kafka (для Logstash-клиента, опционально)
 
 ```bash
 openssl genrsa -out kafka.key 2048
@@ -194,34 +194,128 @@ openssl x509 -req -days 3650 \
   -out kafka.crt
 ```
 
-### 1.6 Распределить сертификаты
+---
+
+## Шаг 2 — Добавление Kafka CA в Logstash truststore
+
+> **Это обязательный шаг.** Kafka и ELK используют **разные CA** (Kafka-CA и ELK-CA).  
+> Logstash должен доверять обоим, иначе получит ошибку `Failed to create new NetworkClient`.
+
+### 2.1 Получить ca.crt от Kafka-кластера
+
+Запустить **на kafka-node-01** HTTP-сервер для раздачи файла:
 
 ```bash
-# Для начала выделяем права на папку (на всех узлах)
-
-sudo chmod -R 644 certs/
-
-sudo chmod 755 certs/
-
-# На все остальные (ca.key и elastic-stack-ca.p12 НЕ копировать) перенести сертификаты удобным способом
-
-cd certs/
-
-sudo python3 -m http.server PORT #в port пишем свой порт
-
-# На остальных нодах пишем
-
-cd certs/
-
-sudo wget http://IP:PORT/требуемый_файл
-
+cd ~/kafka/certs
+python3 -m http.server 8888
 ```
+
+Скачать **на elk-node-01**:
+
+```bash
+cd ~/elk/certs
+wget http://<IP_KAFKA_NODE_01>:8888/ca.crt -O kafka-ca.crt
+```
+
+Остановить сервер на kafka-node-01 (`Ctrl+C`).
+
+Проверить что CA действительно разные:
+
+```bash
+openssl x509 -in ca.crt -noout -subject        # должно быть ELK-CA
+openssl x509 -in kafka-ca.crt -noout -subject  # должно быть Kafka-CA
+```
+
+### 2.2 Добавить Kafka CA в существующий truststore
+
+Используем keytool из образа Logstash (чтобы не зависеть от системной Java):
+
+```bash
+cd ~/elk
+
+sudo docker run -u root --rm \
+  -v "$(pwd)/certs:/certs" \
+  raul5589/logstash-custom:1.2-kafka \
+  /usr/share/logstash/jdk/bin/keytool \
+    -importcert \
+    -file /certs/kafka-ca.crt \
+    -alias kafka-ca \
+    -keystore /certs/logstash-truststore.p12 \
+    -storetype PKCS12 \
+    -storepass "changeit" \
+    -noprompt
+```
+
+### 2.3 Выставить правильные права на truststore
+
+```bash
+sudo chown 1000:1000 certs/logstash-truststore.p12
+sudo chmod 644 certs/logstash-truststore.p12
+```
+
+### 2.4 Проверить содержимое truststore
+
+В truststore должны быть два сертификата:
+
+```bash
+sudo docker run -u root --rm \
+  -v "$(pwd)/certs:/certs" \
+  raul5589/logstash-custom:1.2-kafka \
+  /usr/share/logstash/jdk/bin/keytool \
+    -list \
+    -keystore /certs/logstash-truststore.p12 \
+    -storetype PKCS12 \
+    -storepass "changeit"
+```
+
+Ожидаемый вывод — две записи: одна с alias `1` (ELK-CA) и одна с alias `kafka-ca`.
+
+---
+
+## Шаг 3 — Распределение сертификатов
+
+### 3.1 Выставить права на certs/
+
+```bash
+cd ~/elk
+sudo chmod -R 644 certs/
+sudo chmod 755 certs/
+```
+
+### 3.2 Раздать файлы на elk-node-02 и elk-node-03
+
+**На elk-node-01** — запустить HTTP-сервер:
+
+```bash
+cd ~/elk/certs
+python3 -m http.server 8888
+```
+
+**На elk-node-02 и elk-node-03** — скачать нужные файлы  
+(`ca.key` и `elastic-stack-ca.p12` **не копировать**):
+
+```bash
+mkdir -p ~/elk/certs && cd ~/elk/certs
+
+wget http://<IP_ELK_NODE_01>:8888/ca.crt
+wget http://<IP_ELK_NODE_01>:8888/elastic-certificates.p12
+wget http://<IP_ELK_NODE_01>:8888/kibana.crt
+wget http://<IP_ELK_NODE_01>:8888/kibana.key
+wget http://<IP_ELK_NODE_01>:8888/logstash.crt
+wget http://<IP_ELK_NODE_01>:8888/logstash.key
+wget http://<IP_ELK_NODE_01>:8888/logstash-truststore.p12
+wget http://<IP_ELK_NODE_01>:8888/kafka-ca.crt
+wget http://<IP_ELK_NODE_01>:8888/kafka.crt
+wget http://<IP_ELK_NODE_01>:8888/kafka.key
+```
+
+После скачивания — остановить сервер на elk-node-01 (`Ctrl+C`).
 
 > **`ca.key` и `elastic-stack-ca.p12` хранить только на elk-node-01 в безопасном месте.**
 
 ---
 
-## Шаг 2 — Настройка .env
+## Шаг 4 — Настройка .env
 
 На **каждом** ELK-узле:
 
@@ -231,26 +325,28 @@ cp .env.template .env
 nano .env
 ```
 
-| Переменная               | Описание                                        | Пример                                       |
-|--------------------------|-------------------------------------------------|----------------------------------------------|
-| `NODE_NAME`              | Уникальное имя ноды ES                          | `es-node-01`                                 |
-| `PUBLISH_HOST`           | Локальный IP **этого** сервера                  | `192.168.1.20`                               |
-| `CLUSTER_NAME`           | Имя кластера ES (одинаковое на всех узлах)      | `elk-cluster`                                |
-| `SEED_HOSTS`             | IP всех ES-узлов через запятую                  | `192.168.1.20,192.168.1.21,192.168.1.22`     |
-| `INITIAL_MASTER_NODES`   | Имена всех master-нод (одинаковое везде)        | `es-node-01,es-node-02,es-node-03`           |
-| `ELASTIC_PASSWORD`       | Пароль пользователя `elastic`                   | сложный пароль                               |
-| `KIBANA_PASSWORD`        | Пароль пользователя `kibana_system`             | сложный пароль                               |
-| `KIBANA_ENCRYPTION_KEY`  | Ключ шифрования Kibana (минимум 32 символа)     | случайная строка ≥ 32 символа                |
-| `S3_HOST`                | Хост S3 для снапшотов                           | `s3.example.com`                             |
-| `KAFKA_BOOTSTRAP_SERVERS`| Брокеры Kafka для Logstash                      | `10.0.0.10:9092,10.0.0.11:9092,10.0.0.12:9092` |
+| Переменная                | Описание                                        | Пример                                             |
+|---------------------------|-------------------------------------------------|----------------------------------------------------|
+| `NODE_NAME`               | Уникальное имя ноды ES                          | `es-node-01` / `es-node-02` / `es-node-03`         |
+| `PUBLISH_HOST`            | Локальный IP **этого** сервера                  | `192.168.1.20`                                     |
+| `CLUSTER_NAME`            | Имя кластера ES (одинаковое на всех узлах)      | `elk-cluster`                                      |
+| `SEED_HOSTS`              | IP всех ES-узлов через запятую                  | `192.168.1.20,192.168.1.21,192.168.1.22`           |
+| `INITIAL_MASTER_NODES`    | Имена всех master-нод (одинаковое везде)        | `es-node-01,es-node-02,es-node-03`                 |
+| `ELASTIC_PASSWORD`        | Пароль пользователя `elastic`                   | сложный пароль                                     |
+| `KIBANA_PASSWORD`         | Пароль пользователя `kibana_system`             | сложный пароль                                     |
+| `KIBANA_ENCRYPTION_KEY`   | Ключ шифрования Kibana (минимум 32 символа)     | случайная строка ≥ 32 символа                      |
+| `S3_HOST`                 | Хост S3 для снапшотов                           | `s3.example.com`                                   |
+| `KAFKA_BOOTSTRAP_SERVERS` | Брокеры Kafka — **порт 9092 (SSL)**             | `10.0.0.10:9092,10.0.0.11:9092,10.0.0.12:9092`    |
 
-> `CLUSTER_NAME`, `SEED_HOSTS` и `INITIAL_MASTER_NODES` должны быть **одинаковыми** на всех трёх ELK-узлах.
+> `CLUSTER_NAME`, `SEED_HOSTS` и `INITIAL_MASTER_NODES` должны быть **одинаковыми** на всех трёх ELK-узлах.  
+> `KAFKA_BOOTSTRAP_SERVERS` — обязательно порт **9092**, не 9094.
 
 ---
 
-## Шаг 3 — Запуск кластера
+## Шаг 5 — Запуск кластера
 
-> **Запускать одновременно на всех трёх узлах.** Elasticsearch не достигнет кворума, пока не поднимутся все три ноды из `INITIAL_MASTER_NODES`.
+> **Запускать одновременно на всех трёх узлах.**  
+> Elasticsearch не достигнет кворума, пока не поднимутся все ноды из `INITIAL_MASTER_NODES`.
 
 ```bash
 cd ~/elk
@@ -261,46 +357,49 @@ docker compose up -d
 
 ```bash
 docker compose ps
-docker logs ${NODE_NAME} --tail 80
+docker logs es-node-01 --tail 80
 ```
 
 Дождаться строки в логах:
 
 ```
-[INFO ][o.e.c.r.ClusterBootstrapService] [es-node-01] master node changed ...
+[INFO ][o.e.c.r.ClusterBootstrapService] master node changed ...
 ```
 
 ---
 
-## Шаг 4 — Установка паролей
+## Шаг 6 — Установка пароля kibana\_system
 
-Выполнить **один раз** с любого ELK-узла после старта Elasticsearch:
+Выполнить **один раз** с любого ELK-узла после старта Elasticsearch.  
+Подставить реальные значения паролей из `.env`:
 
 ```bash
 curl -k \
-  -u elastic:${ELASTIC_PASSWORD} \
+  -u elastic:ELASTIC_PASSWORD \
   -X POST "https://localhost:9200/_security/user/kibana_system/_password" \
   -H "Content-Type: application/json" \
-  -d '{"password": "${KIBANA_PASSWORD}"}'
+  -d '{"password": "KIBANA_PASSWORD"}'
 ```
 
 Успешный ответ: `{}`
 
-> Замените `${ELASTIC_PASSWORD}` и `${KIBANA_PASSWORD}` на значения из `.env`.
+> После этого перезапустить Kibana, чтобы она подхватила новый пароль:
+> ```bash
+> docker compose restart kibana
+> ```
 
 ---
 
-## Шаг 5 — Настройка ILM (Index Lifecycle Management)
+## Шаг 7 — Настройка ILM (Index Lifecycle Management)
 
-Logstash по умолчанию включает ILM и переопределяет настройку `index`, из-за чего данные
-не попадают в нужные индексы `filebeat-YYYY.MM.dd`. Необходимо создать ILM-политику и
-шаблон индекса, которые соответствуют конфигу Logstash.
+> Logstash по умолчанию включает ILM. Без шаблона данные не попадут в индексы `filebeat-YYYY.MM.dd`.  
+> Выполнить один раз с любого ELK-узла.
 
-### 5.1 Создать ILM-политику
+### 7.1 Создать ILM-политику
 
 ```bash
 curl -k \
-  -u elastic:${ELASTIC_PASSWORD} \
+  -u elastic:ELASTIC_PASSWORD \
   -X PUT "https://localhost:9200/_ilm/policy/filebeat-policy" \
   -H "Content-Type: application/json" \
   -d '{
@@ -337,15 +436,11 @@ curl -k \
   }'
 ```
 
-> Параметры политики (`max_age`, `min_age` фазы delete и т.д.) — настройте под свои требования.
-
-### 5.2 Создать шаблон индекса
-
-Шаблон применяется ко всем индексам по маске `filebeat-*` и привязывает к ним политику ILM:
+### 7.2 Создать шаблон индекса
 
 ```bash
 curl -k \
-  -u elastic:${ELASTIC_PASSWORD} \
+  -u elastic:ELASTIC_PASSWORD \
   -X PUT "https://localhost:9200/_index_template/filebeat-template" \
   -H "Content-Type: application/json" \
   -d '{
@@ -371,29 +466,29 @@ curl -k \
   }'
 ```
 
-### 5.3 Проверить ILM
+### 7.3 Проверить ILM
 
 ```bash
 # Список политик
-curl -k -u elastic:${ELASTIC_PASSWORD} \
+curl -k -u elastic:ELASTIC_PASSWORD \
   "https://localhost:9200/_ilm/policy?pretty"
 
 # Статус ILM по индексам filebeat-*
-curl -k -u elastic:${ELASTIC_PASSWORD} \
+curl -k -u elastic:ELASTIC_PASSWORD \
   "https://localhost:9200/filebeat-*/_ilm/explain?pretty"
 ```
 
 ---
 
-## Шаг 6 — Настройка S3 snapshot-репозитория
+## Шаг 8 — Настройка S3 snapshot-репозитория
 
-### 6.1 Добавить S3-credentials в keystore Elasticsearch
+### 8.1 Добавить S3-credentials в keystore Elasticsearch
 
 Выполнить на **каждом** ELK-узле:
 
 ```bash
 # Войти в контейнер
-docker exec -it ${NODE_NAME} bash
+docker exec -it es-node-01 bash
 
 # Добавить Access Key
 echo "YOUR_S3_ACCESS_KEY" | \
@@ -406,21 +501,21 @@ echo "YOUR_S3_SECRET_KEY" | \
 exit
 ```
 
-После добавления credentials перезагрузить настройки безопасного хранилища:
+Перезагрузить keystore без перезапуска контейнера:
 
 ```bash
 curl -k \
-  -u elastic:${ELASTIC_PASSWORD} \
+  -u elastic:ELASTIC_PASSWORD \
   -X POST "https://localhost:9200/_nodes/reload_secure_settings" \
   -H "Content-Type: application/json" \
   -d '{}'
 ```
 
-### 6.2 Зарегистрировать S3-репозиторий
+### 8.2 Зарегистрировать S3-репозиторий
 
 ```bash
 curl -k \
-  -u elastic:${ELASTIC_PASSWORD} \
+  -u elastic:ELASTIC_PASSWORD \
   -X PUT "https://localhost:9200/_snapshot/s3_backup" \
   -H "Content-Type: application/json" \
   -d '{
@@ -433,19 +528,18 @@ curl -k \
   }'
 ```
 
-### 6.3 Проверить репозиторий
+### 8.3 Проверить репозиторий
 
 ```bash
-curl -k \
-  -u elastic:${ELASTIC_PASSWORD} \
+curl -k -u elastic:ELASTIC_PASSWORD \
   "https://localhost:9200/_snapshot/s3_backup?pretty"
 ```
 
-### 6.4 Создать снапшот вручную (тест)
+### 8.4 Тестовый снапшот вручную
 
 ```bash
 curl -k \
-  -u elastic:${ELASTIC_PASSWORD} \
+  -u elastic:ELASTIC_PASSWORD \
   -X PUT "https://localhost:9200/_snapshot/s3_backup/snapshot_test?wait_for_completion=true" \
   -H "Content-Type: application/json" \
   -d '{
@@ -455,11 +549,11 @@ curl -k \
   }'
 ```
 
-### 6.5 Настроить автоматические снапшоты через Snapshot Lifecycle Management (SLM)
+### 8.5 Автоматические снапшоты (SLM)
 
 ```bash
 curl -k \
-  -u elastic:${ELASTIC_PASSWORD} \
+  -u elastic:ELASTIC_PASSWORD \
   -X PUT "https://localhost:9200/_slm/policy/daily-snapshots" \
   -H "Content-Type: application/json" \
   -d '{
@@ -481,21 +575,21 @@ curl -k \
 
 ---
 
-## Шаг 7 — Проверка системы
+## Шаг 9 — Проверка системы
 
 ### Health кластера
 
 ```bash
-curl -k -u elastic:${ELASTIC_PASSWORD} \
+curl -k -u elastic:ELASTIC_PASSWORD \
   "https://localhost:9200/_cluster/health?pretty"
 ```
 
-Ожидаемый статус: `green` (все реплики размещены) или `yellow` (реплики ожидают узла).
+Ожидаемый статус: `green` (все реплики размещены) или `yellow` (ждут узла).
 
 ### Узлы кластера
 
 ```bash
-curl -k -u elastic:${ELASTIC_PASSWORD} \
+curl -k -u elastic:ELASTIC_PASSWORD \
   "https://localhost:9200/_cat/nodes?v"
 ```
 
@@ -504,16 +598,19 @@ curl -k -u elastic:${ELASTIC_PASSWORD} \
 Открыть в браузере: `https://<IP>:5601`  
 Логин: `elastic` / пароль из `ELASTIC_PASSWORD`
 
-### Проверить поступление данных
+> Если браузер показывает ошибку сертификата — это ожидаемо для самоподписанного сертификата.  
+> В **Firefox**: нажать "Дополнительно" → "Принять риск и продолжить".  
+> В **Chrome/Edge**: напечатать на странице с ошибкой слово `thisisunsafe` (без поля ввода).
+
+### Проверить поступление данных из Kafka
 
 ```bash
-# Появление индексов filebeat-*
-curl -k -u elastic:${ELASTIC_PASSWORD} \
+curl -k -u elastic:ELASTIC_PASSWORD \
   "https://localhost:9200/_cat/indices?v&index=filebeat-*"
 ```
 
-В Kibana: **Stack Management → Index Management** — убедиться, что индексы `filebeat-*` существуют.  
-Затем создать Data View: **Discover → Create data view → Pattern: `filebeat-*`**.
+В Kibana: **Stack Management → Index Management** → убедиться что индексы `filebeat-*` существуют.  
+Затем: **Discover → Create data view → Pattern: `filebeat-*`**.
 
 ---
 
@@ -546,16 +643,16 @@ output {
 }
 ```
 
-### Переопределить конфиг через volume mount
+### Переопределить конфиг через volume mount (рекомендуется)
 
-В `docker-compose.yml` в секции `logstash.volumes` есть закомментированная строка. Раскомментировать её:
+В `docker-compose.yml` раскомментировать строку в секции `logstash.volumes`:
 
 ```yaml
 volumes:
   - ./logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
 ```
 
-Создать файл `~/elk/logstash.conf` с нужным содержимым, затем пересоздать контейнер:
+Создать `~/elk/logstash.conf` с нужным содержимым, затем:
 
 ```bash
 docker compose up -d --force-recreate logstash
@@ -578,26 +675,26 @@ docker restart logstash-es-node-01
 
 ```bash
 # Логи контейнеров
-docker logs es-node-01         -f --tail 100
+docker logs es-node-01          -f --tail 100
 docker logs logstash-es-node-01 -f --tail 100
-docker logs kibana-es-node-01  -f --tail 100
+docker logs kibana-es-node-01   -f --tail 100
 
-# Остановка (данные сохраняются)
+# Остановка (данные сохраняются в volumes)
 docker compose down
 
 # Запуск
 docker compose up -d
 
-# Список индексов
-curl -k -u elastic:${ELASTIC_PASSWORD} \
+# Список индексов по размеру
+curl -k -u elastic:ELASTIC_PASSWORD \
   "https://localhost:9200/_cat/indices?v&s=store.size:desc"
 
 # Состояние шардов
-curl -k -u elastic:${ELASTIC_PASSWORD} \
+curl -k -u elastic:ELASTIC_PASSWORD \
   "https://localhost:9200/_cat/shards?v"
 ```
 
->  **Никогда не выполняйте `docker compose down -v` без предварительного снапшота** — это уничтожит все данные Elasticsearch.
+> ⚠️ **Никогда не выполняйте `docker compose down -v` без предварительного снапшота** — это уничтожит все данные Elasticsearch.
 
 ---
 
@@ -606,9 +703,11 @@ curl -k -u elastic:${ELASTIC_PASSWORD} \
 | Симптом | Причина | Решение |
 |---------|---------|---------|
 | ES не стартует: `max virtual memory areas` | `vm.max_map_count` слишком мал | `sudo sysctl -w vm.max_map_count=262144` |
-| Кластер не собирается, статус `red` | Не все ноды запустились одновременно | Убедиться, что все три ноды запущены |
-| Kibana: `kibana_system password incorrect` | Пароль `kibana_system` не установлен | Выполнить команду из Шага 4 |
-| Индексы `filebeat-*` не создаются | ILM-шаблон не применён | Выполнить Шаг 5 |
-| Logstash: `index write blocked` | ILM-политика заблокировала индекс | Проверить фазу ILM: `/_ilm/explain` |
-| S3: `repository_exception` при создании репо | Неверные credentials или endpoint | Проверить keystore и `S3_HOST` в `.env` |
-| Logstash не подключается к Kafka | Неверный `KAFKA_BOOTSTRAP_SERVERS` | Проверить IP:порт Kafka-брокеров, доступность порта 9092 |
+| Кластер не собирается, статус `red` | Не все ноды запустились одновременно | Убедиться что все три ноды запущены, перезапустить |
+| Kibana: `unable to authenticate kibana_system` | Пароль `kibana_system` не установлен | Выполнить команду из Шага 6 |
+| Logstash: `Failed to create new NetworkClient` | Неверный порт в `KAFKA_BOOTSTRAP_SERVERS` | Убедиться что порт **9092**, не 9094 |
+| Logstash: `Failed to construct kafka consumer` | Logstash не доверяет сертификату Kafka | Выполнить Шаг 2 — добавить Kafka-CA в truststore |
+| Индексы `filebeat-*` не создаются | ILM-шаблон не применён | Выполнить Шаг 7 |
+| Logstash: `index write blocked` | ILM-политика заблокировала индекс | Проверить `/_ilm/explain` |
+| S3: `repository_exception` | Неверные credentials или endpoint | Проверить keystore и `S3_HOST` в `.env` |
+| Kibана не открывается в браузере | Кеш старого сертификата | Открыть в режиме инкогнито или очистить кеш сертификатов |
