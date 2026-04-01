@@ -475,38 +475,6 @@ curl -k -u elastic:${ELASTIC_PASSWORD} \
   "https://localhost:9200/filebeat-*/_ilm/explain?pretty"
 ```
 
-### Если возникают ошибки и индекс не переходит в фазы, описанные в политике:
-
-> Нужно ввести данный блок кода в интерфейсе Kibana - Dev tools. Он привяжет алиас к новым индексам
-
-```
-PUT _index_template/filebeat-template
-{
-  "index_patterns": ["filebeat-*"],
-  "template": {
-    "aliases": {
-      "filebeat": {}
-    }
-  }
-}
-```
-
-> А этот блок кода привяжет алиасы ко всем текущим индексам
-
-```
-POST /_aliases
-{
-  "actions": [
-    {
-      "add": {
-        "index": "filebeat-*",
-        "alias": "filebeat"
-      }
-    }
-  ]
-}
-```
-
 ---
 
 ## Шаг 8 — Настройка S3 snapshot-репозитория
@@ -601,6 +569,16 @@ curl -k \
     }
   }'
 ```
+
+### ОБЯЗАТЕЛЬНО!
+
+После настройки, нужно изменить ILM политику, чтобы при удалении старых индексов, сначала был сделан снапшот, а уже потом ElasticSearch удалял индекс.
+
+Для этого нужно зайти Stack Management - Index Lifecycle Management - (нажать на) filebeat-policy - Manage - Edit - (В самом низу будет) Wait for snapshot policy
+
+Выбираем политику daily-snapshots (или если создавали со своим именем, выберете нужную политику)
+
+Сохраняем
 
 ---
 
