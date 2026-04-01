@@ -407,9 +407,8 @@ curl -k \
         "hot": {
           "min_age": "0ms",
           "actions": {
-            "rollover": {
-              "max_age": "1d",
-              "max_size": "10gb"
+            "set_priority": {
+              "priority": 100
             }
           }
         },
@@ -448,8 +447,7 @@ curl -k \
       "settings": {
         "number_of_shards": 1,
         "number_of_replicas": 1,
-        "index.lifecycle.name": "filebeat-policy",
-        "index.lifecycle.rollover_alias": "filebeat"
+        "index.lifecycle.name": "filebeat-policy"
       },
       "mappings": {
         "dynamic": true,
