@@ -417,9 +417,6 @@ curl -k \
           "actions": {
             "forcemerge": {
               "max_num_segments": 1
-            },
-            "shrink": {
-              "number_of_shards": 1
             }
           }
         },
