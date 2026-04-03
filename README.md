@@ -610,49 +610,7 @@ curl -k -u elastic:${ELASTIC_PASSWORD} \
 
 ## ОБЯЗАТЕЛЬНОЕ Изменение конфигурации Logstash pipeline
 
-Встроенный в образ конфиг `/usr/share/logstash/pipeline/logstash.conf` изменить, на приведенный ниже, поскольку конфиг в образе не использует SSL:
-
-```ruby
-input {
-  kafka {
-    bootstrap_servers => "${KAFKA_BOOTSTRAP_SERVERS}"
-    topics => ["kafka-logs"]
-    group_id => "logstash-diploma-v2"
-    auto_offset_reset => "earliest"
-    codec => "json"
-    
-    security_protocol => "SSL"
-    ssl_truststore_type => "pkcs12"
-    ssl_truststore_location => "/usr/share/logstash/config/certs/logstash-truststore.p12"
-    ssl_truststore_password => "changeit"
-    ssl_endpoint_identification_algorithm => ""
-  }
-}
-
-filter {
-}
-
-output {
-  elasticsearch {
-    hosts => ["https://elasticsearch:9200"]
-    user => "elastic"
-    password => "${ELASTIC_PASSWORD}"
-    ssl_verification_mode => "none"
-    index => "filebeat-%{+YYYY.MM.dd}"
-  }
-}
-```
-
-### Переопределить конфиг через volume mount (рекомендуется)
-
-В `docker-compose.yml` раскомментировать строку в секции `logstash.volumes`:
-
-```yaml
-volumes:
-  - ./logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
-```
-
-Создать `~/elk/logstash.conf` с нужным содержимым, затем:
+Отредактировать `~/elk/logstash.conf` с нужным содержимым, затем:
 
 ```bash
 docker compose up -d --force-recreate logstash
