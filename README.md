@@ -391,9 +391,6 @@ curl -k -X POST "https://127.0.0.1:9200/_security/user/kibana_system/_password" 
 
 ## Шаг 7 — Настройка ILM (Index Lifecycle Management)
 
-> Logstash по умолчанию включает ILM. Без шаблона данные не попадут в индексы `filebeat-YYYY.MM.dd`.  
-> Выполнить один раз с любого ELK-узла.
-
 ### 7.1 Создать ILM-политику
 
 ```bash
