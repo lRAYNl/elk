@@ -557,9 +557,9 @@ curl -k \
       "include_global_state": false
     },
     "retention": {
-      "expire_after": "30d",
+      "expire_after": "365d",
       "min_count": 5,
-      "max_count": 50
+      "max_count": 400
     }
   }'
 ```
